@@ -1,0 +1,12 @@
+.next/
+node_modules/
+out/
+build/
+coverage/
+.playwright-cli/
+output/
+.env*.local
+.env
+public/generated/
+public/videos/
+*.tsbuildinfo
