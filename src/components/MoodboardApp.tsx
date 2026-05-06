@@ -479,11 +479,16 @@ export function MoodboardApp({ initialProjectId }: { initialProjectId?: string |
 
   async function pollVideoJobs(jobs: VideoJob[]) {
     let nextJobs = jobs;
+    const statusHeaders = authHeaders();
+    if (!statusHeaders) {
+      setBusy("idle");
+      return;
+    }
     while (nextJobs.some((job) => job.status === "pending" || job.status === "processing")) {
       await new Promise((resolve) => setTimeout(resolve, 5000));
       const statuses = await Promise.all(
         nextJobs.map(async (job) => {
-          const response = await fetch(`/api/video-status/${job.id}`);
+          const response = await fetch(`/api/video-status/${job.id}`, { headers: statusHeaders });
           if (!response.ok) return job;
           return (await response.json()) as VideoJob;
         })

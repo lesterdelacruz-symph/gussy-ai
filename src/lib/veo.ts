@@ -35,6 +35,13 @@ export async function pollUntilDone(operation: GenerateVideosOperation): Promise
   return operation;
 }
 
+export async function getVideoOperation(operationName: string): Promise<GenerateVideosOperation> {
+  const ai = getGoogleAI();
+  return ai.operations.getVideosOperation({
+    operation: { name: operationName } as GenerateVideosOperation
+  });
+}
+
 export async function downloadVideo(operation: GenerateVideosOperation) {
   const ai = getGoogleAI();
   const video = operation.response?.generatedVideos?.[0]?.video;

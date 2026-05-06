@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { mkdirSync, readFileSync, writeFileSync } from "fs";
+import { readFileSync } from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
-import { uploadProjectMedia } from "@/lib/supabase-media";
+import { SUPABASE_STORAGE_BUCKET } from "@/lib/supabase-config";
+import { storagePathForMedia } from "@/lib/supabase-project-store";
 import { assertProjectOwner, getAuthenticatedUser } from "@/lib/supabase-server";
 import { buildWalkthroughVideoPrompt } from "@/lib/video-prompt-builder";
-import { createVideoJob, updateVideoJob, videoStore } from "@/lib/video-jobs";
-import { downloadVideo, pollUntilDone, startVideoGeneration } from "@/lib/veo";
+import { startVideoGeneration } from "@/lib/veo";
 
 export async function POST(request: NextRequest) {
   try {
@@ -24,67 +24,39 @@ export async function POST(request: NextRequest) {
     await assertProjectOwner(body.projectId, user.id, client);
 
     const sourceImage = body.images[0];
-    const job = createVideoJob({
-      id: uuidv4(),
-      projectId: body.projectId,
-      index: 0
+    const imageData = await readImageData(sourceImage, request.nextUrl.origin);
+    const prompt = buildWalkthroughVideoPrompt({
+      clipIndex: 1,
+      clipCount: 1,
+      basePrompt: body.prompt
     });
-    const jobs = [job];
+    const operation = await startVideoGeneration(prompt, imageData.base64, imageData.mimeType);
+    if (!operation.name) throw new Error("Video operation did not return an operation name.");
 
-    {
-      const diskFilename = `${sanitize(body.projectId)}-walkthrough-${job.id}.mp4`;
+    const jobId = uuidv4();
+    const storagePath = storagePathForMedia(user.id, body.projectId, "videos", jobId, "video/mp4");
+    const { error: insertError } = await client.from("generated_media").insert({
+      id: jobId,
+      project_id: body.projectId,
+      kind: "walkthrough_video",
+      status: "processing",
+      storage_bucket: SUPABASE_STORAGE_BUCKET,
+      storage_path: storagePath,
+      public_url: "",
+      mime_type: "video/mp4",
+      prompt,
+      model: "veo-3.1-generate-preview",
+      metadata: {
+        operationName: operation.name,
+        sourceRenderId: sourceImage.id,
+        selectedRenderCount: body.images.length,
+        durationSeconds: 8,
+        walkthroughMode: "single_continuous_clip"
+      }
+    });
+    if (insertError) throw new Error(insertError.message);
 
-      void (async () => {
-        try {
-          updateVideoJob(job.id, { status: "processing", diskFilename });
-          const imageData = await readImageData(sourceImage, request.nextUrl.origin);
-          const prompt = buildWalkthroughVideoPrompt({
-            clipIndex: 1,
-            clipCount: 1,
-            basePrompt: body.prompt
-          });
-          const operation = await startVideoGeneration(prompt, imageData.base64, imageData.mimeType);
-          updateVideoJob(job.id, { operationName: operation.name });
-          const completedOperation = await pollUntilDone(operation);
-          const video = await downloadVideo(completedOperation);
-
-          if (!video) {
-            updateVideoJob(job.id, { status: "failed", error: "No video data returned" });
-            return;
-          }
-
-          saveVideoToDisk(diskFilename, video.bytes);
-          const { publicUrl } = await uploadProjectMedia({
-            userId: user.id,
-            projectId: body.projectId!,
-            mediaId: job.id,
-            folder: "videos",
-            kind: "walkthrough_video",
-            bytes: video.bytes,
-            mimeType: video.mimeType,
-            prompt,
-            metadata: {
-              sourceRenderId: sourceImage.id,
-              selectedRenderCount: body.images!.length,
-              durationSeconds: 8,
-              walkthroughMode: "single_continuous_clip"
-            },
-            client
-          });
-          videoStore.set(job.id, { bytes: video.bytes, mimeType: video.mimeType });
-          updateVideoJob(job.id, {
-            status: "succeeded",
-            videoUrl: publicUrl,
-            diskFilename
-          });
-        } catch (error) {
-          updateVideoJob(job.id, {
-            status: "failed",
-            error: error instanceof Error ? error.message : "Video generation failed"
-          });
-        }
-      })();
-    }
+    const jobs = [{ id: jobId, status: "processing" as const }];
 
     return NextResponse.json({ jobs });
   } catch (error) {
@@ -93,16 +65,6 @@ export async function POST(request: NextRequest) {
       { status: authStatus(error) }
     );
   }
-}
-
-function saveVideoToDisk(filename: string, bytes: Buffer) {
-  const videosDir = path.join(process.cwd(), "public", "videos");
-  mkdirSync(videosDir, { recursive: true });
-  writeFileSync(path.join(videosDir, filename), bytes);
-}
-
-function sanitize(value: string) {
-  return value.replace(/[^a-z0-9-]/gi, "-");
 }
 
 async function readImageData(image: { base64?: string; mimeType?: string; url?: string }, origin: string) {

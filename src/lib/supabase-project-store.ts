@@ -203,12 +203,12 @@ export function mediaToVideoState(media: SupabaseGeneratedMediaRow[]): {
   stitchedVideoUrl: string | null;
 } {
   const videoJobs = media
-    .filter((item) => item.kind === "video_clip")
+    .filter((item) => item.kind === "video_clip" || item.kind === "walkthrough_video")
     .sort((a, b) => a.created_at.localeCompare(b.created_at))
     .map((item) => ({
       id: item.id,
       status: item.status,
-      videoUrl: item.public_url,
+      videoUrl: item.public_url || undefined,
       error: item.error ?? undefined
     }));
 

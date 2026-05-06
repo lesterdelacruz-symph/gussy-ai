@@ -214,7 +214,7 @@ describe("supabase project store mapping", () => {
     ];
 
     expect(mediaToGeneratedRenders(media)).toEqual([]);
-    expect(mediaToVideoState(media).videoJobs).toEqual([{ id: "clip-1", status: "processing", videoUrl: "", error: undefined }]);
+    expect(mediaToVideoState(media).videoJobs).toEqual([{ id: "clip-1", status: "processing", videoUrl: undefined, error: undefined }]);
     expect(storagePathForMedia("user-1", project.id, "renders", "render-1", "image/png")).toBe(
       `user-1/${project.id}/renders/render-1.png`
     );
