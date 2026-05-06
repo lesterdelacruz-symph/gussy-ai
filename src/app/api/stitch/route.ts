@@ -1,15 +1,23 @@
 import { execFile } from "child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
-import path from "path";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import os from "os";
+import path from "path";
 import { promisify } from "util";
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import { uploadProjectMedia } from "@/lib/supabase-media";
 import { assertProjectOwner, getAuthenticatedUser } from "@/lib/supabase-server";
-import { videoJobs } from "@/lib/video-jobs";
 
 const execFileAsync = promisify(execFile);
+
+interface VideoMediaRow {
+  id: string;
+  project_id: string;
+  kind: "video_clip" | "walkthrough_video";
+  status: "pending" | "processing" | "succeeded" | "failed";
+  public_url: string | null;
+  mime_type: string | null;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,36 +29,63 @@ export async function POST(request: NextRequest) {
     const { user, client } = await getAuthenticatedUser(request);
     await assertProjectOwner(body.projectId, user.id, client);
 
-    const videosDir = path.join(process.cwd(), "public", "videos");
-    mkdirSync(videosDir, { recursive: true });
+    const { data, error } = await client
+      .from("generated_media")
+      .select("id, project_id, kind, status, public_url, mime_type")
+      .eq("project_id", body.projectId)
+      .in("id", body.jobIds)
+      .in("kind", ["video_clip", "walkthrough_video"]);
+    if (error) throw new Error(error.message);
 
-    const clipPaths = body.jobIds.map((jobId) => {
-      const job = videoJobs.get(jobId);
-      if (!job || job.status !== "succeeded" || !job.diskFilename) {
+    const rowsById = new Map((data ?? []).map((row) => [row.id, row as VideoMediaRow]));
+    const videos = body.jobIds.map((jobId) => {
+      const row = rowsById.get(jobId);
+      if (!row || row.status !== "succeeded" || !row.public_url) {
         throw new Error(`Video job is not ready: ${jobId}`);
       }
-      const filePath = path.join(videosDir, job.diskFilename);
-      if (!existsSync(filePath)) {
-        throw new Error(`Missing video file: ${job.diskFilename}`);
-      }
-      return filePath;
+      return row;
     });
 
-    const outputFilename = `${sanitize(body.projectId)}-walkthrough-final.mp4`;
-    const outputPath = path.join(videosDir, outputFilename);
+    if (videos.length === 1) {
+      return NextResponse.json({ url: videos[0].public_url });
+    }
+
+    const outputPath = path.join(os.tmpdir(), `${sanitize(body.projectId)}-${uuidv4()}-walkthrough-final.mp4`);
     const tempFiles: string[] = [];
 
     try {
-      if (clipPaths.length === 1) {
-        copyFileSync(clipPaths[0], outputPath);
-      } else {
-        const concatFile = path.join(os.tmpdir(), `gussy-concat-${Date.now()}.txt`);
-        tempFiles.push(concatFile);
-        writeFileSync(concatFile, clipPaths.map((clipPath) => `file '${escapeConcatPath(clipPath)}'`).join("\n"));
-        await execFileAsync("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", concatFile, "-c", "copy", outputPath]);
-      }
+      const clipPaths = await Promise.all(
+        videos.map(async (video, index) => {
+          const clipPath = path.join(os.tmpdir(), `gussy-clip-${uuidv4()}-${index}.mp4`);
+          tempFiles.push(clipPath);
+          const response = await fetch(video.public_url!);
+          if (!response.ok) throw new Error(`Video file could not be loaded: ${video.id}`);
+          writeFileSync(clipPath, Buffer.from(await response.arrayBuffer()));
+          return clipPath;
+        })
+      );
+
+      const concatFile = path.join(os.tmpdir(), `gussy-concat-${uuidv4()}.txt`);
+      tempFiles.push(concatFile);
+      writeFileSync(concatFile, clipPaths.map((clipPath) => `file '${escapeConcatPath(clipPath)}'`).join("\n"));
+      await execFileAsync("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", concatFile, "-c", "copy", outputPath]);
+
+      const mediaId = uuidv4();
+      const { publicUrl } = await uploadProjectMedia({
+        userId: user.id,
+        projectId: body.projectId,
+        mediaId,
+        folder: "videos",
+        kind: "walkthrough_video",
+        bytes: readFileSync(outputPath),
+        mimeType: "video/mp4",
+        metadata: { jobIds: body.jobIds },
+        client
+      });
+
+      return NextResponse.json({ url: publicUrl });
     } finally {
-      for (const tempFile of tempFiles) {
+      for (const tempFile of [...tempFiles, outputPath]) {
         try {
           if (existsSync(tempFile)) unlinkSync(tempFile);
         } catch {
@@ -58,21 +93,6 @@ export async function POST(request: NextRequest) {
         }
       }
     }
-
-    const mediaId = uuidv4();
-    const { publicUrl } = await uploadProjectMedia({
-      userId: user.id,
-      projectId: body.projectId,
-      mediaId,
-      folder: "videos",
-      kind: "walkthrough_video",
-      bytes: readFileSync(outputPath),
-      mimeType: "video/mp4",
-      metadata: { jobIds: body.jobIds },
-      client
-    });
-
-    return NextResponse.json({ url: publicUrl });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to stitch videos" },
