@@ -10,6 +10,7 @@ import {
   ImagePlus,
   Loader2,
   PanelRight,
+  FileText,
   Play,
   Sparkles,
   Wand2,
@@ -20,8 +21,10 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AssetLibrary } from "@/components/AssetLibrary";
 import { CanvasWorkspace, type CanvasWorkspaceRef } from "@/components/CanvasWorkspace";
-import { createCanvasItem, normalizeZIndex } from "@/lib/canvas-utils";
+import { createCanvasItem, normalizeZIndex, repairCanvasAspectRatios } from "@/lib/canvas-utils";
 import { getCarouselIndex } from "@/lib/carousel";
+import { listDesignerCatalogAssets } from "@/lib/catalog-loader";
+import { buildFFESchedule, formatMoney, type FFEScheduleSummary } from "@/lib/ffe-schedule";
 import { furnitureAssets, getFurnitureAssetFromList } from "@/lib/furniture-assets";
 import { appendGeneratedRender, beginRenderGeneration } from "@/lib/render-state";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
@@ -38,8 +41,9 @@ import {
 import type { CanvasState, FurnitureAsset, GeneratedRender, MoodboardProject, ProjectSummary, VideoJob } from "@/lib/types";
 import { listUploadedAssets } from "@/lib/uploaded-assets";
 
-type BusyState = "idle" | "rendering" | "video" | "stitching";
+type BusyState = "idle" | "rendering" | "video" | "stitching" | "exporting";
 type AuthMode = "sign-in" | "sign-up";
+type RightPanelView = "photos" | "schedule" | "video";
 const REMOTE_SAVE_DEBOUNCE_MS = 900;
 const DEFAULT_RENDER_STYLE =
   "photo-realistic interior design showroom with plain warm walls, coherent studio lighting, natural contact shadows, and showroom-grade materials";
@@ -58,6 +62,7 @@ export function MoodboardApp({ initialProjectId }: { initialProjectId?: string |
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [currentProject, setCurrentProject] = useState<MoodboardProject | null>(null);
   const [uploadedAssets, setUploadedAssets] = useState<FurnitureAsset[]>([]);
+  const [catalogAssets, setCatalogAssets] = useState<FurnitureAsset[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [busy, setBusy] = useState<BusyState>("idle");
   const [, setStatus] = useState("Ready");
@@ -74,7 +79,14 @@ export function MoodboardApp({ initialProjectId }: { initialProjectId?: string |
     () => currentProject?.renders.filter((render) => render.selected && render.status !== "pending").length ?? 0,
     [currentProject?.renders]
   );
-  const allAssets = useMemo(() => [...uploadedAssets, ...furnitureAssets], [uploadedAssets]);
+  const allAssets = useMemo(() => [...uploadedAssets, ...catalogAssets, ...furnitureAssets], [catalogAssets, uploadedAssets]);
+  const ffeSchedule = useMemo(
+    () =>
+      currentProject
+        ? buildFFESchedule(currentProject.canvas, allAssets, currentProject.budgetCurrency)
+        : { rows: [], total: 0, pricedItemCount: 0, currency: "PHP" },
+    [allAssets, currentProject]
+  );
 
   async function loadWorkspace(client: SupabaseClient, activeSession: Session) {
     setLoadingWorkspace(true);
@@ -87,12 +99,19 @@ export function MoodboardApp({ initialProjectId }: { initialProjectId?: string |
         project = await createRemoteProject(client, activeSession.user.id, "Living Room Moodboard");
       }
 
-      currentProjectRef.current = project;
-      lastRemoteProjectRef.current = project;
-      setCurrentProject(project);
+      const [uploads, catalog] = await Promise.all([listUploadedAssets(client), listDesignerCatalogAssets(client)]);
+      const workspaceAssets = [...uploads, ...catalog, ...furnitureAssets];
+      const repairedProject = repairCanvasAspectRatios(project, workspaceAssets);
+      currentProjectRef.current = repairedProject;
+      lastRemoteProjectRef.current = repairedProject;
+      setCurrentProject(repairedProject);
       setProjects(await listRemoteProjects(client));
-      setUploadedAssets(await listUploadedAssets(client));
+      setUploadedAssets(uploads);
+      setCatalogAssets(catalog);
       await saveLastActiveProjectId(client, activeSession.user.id, project.id);
+      if (repairedProject !== project) {
+        lastRemoteProjectRef.current = await saveRemoteProjectSnapshot(client, activeSession.user.id, repairedProject, project);
+      }
       setStatus("Workspace synced.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Failed to load workspace.");
@@ -133,6 +152,7 @@ export function MoodboardApp({ initialProjectId }: { initialProjectId?: string |
       setCurrentProject(null);
       setProjects([]);
       setUploadedAssets([]);
+      setCatalogAssets([]);
       return;
     }
 
@@ -220,9 +240,13 @@ export function MoodboardApp({ initialProjectId }: { initialProjectId?: string |
     try {
       const project = await loadRemoteProject(supabase, projectId);
       if (!project) return;
-      lastRemoteProjectRef.current = project;
-      persistProject(project, { saveRemote: false });
-      await saveLastActiveProjectId(supabase, session.user.id, project.id);
+      const repairedProject = repairCanvasAspectRatios(project, allAssets);
+      lastRemoteProjectRef.current = repairedProject;
+      persistProject(repairedProject, { saveRemote: false });
+      await saveLastActiveProjectId(supabase, session.user.id, repairedProject.id);
+      if (repairedProject !== project) {
+        lastRemoteProjectRef.current = await saveRemoteProjectSnapshot(supabase, session.user.id, repairedProject, project);
+      }
       setSelectedItemId(null);
       setStatus("Project loaded.");
     } catch (error) {
@@ -300,8 +324,8 @@ export function MoodboardApp({ initialProjectId }: { initialProjectId?: string |
     const projectForGeneration = currentProject;
     const canvasState = currentProject.canvas;
     const selectedFurnitureAssets = canvasState.items
-      .map((item) => getFurnitureAssetFromList(item.assetId, uploadedAssets))
-      .filter(Boolean);
+      .map((item) => getFurnitureAssetFromList(item.assetId, allAssets))
+      .filter((asset): asset is FurnitureAsset => Boolean(asset));
 
     setBusy("rendering");
     setStatus("Starting realistic image generation...");
@@ -351,7 +375,7 @@ export function MoodboardApp({ initialProjectId }: { initialProjectId?: string |
         setStatus(`Generated ${index}/4 realistic image versions.`);
       }
 
-      setStatus("Generated render versions. All versions are selected for walkthrough video.");
+      setStatus("Generated render versions. Select the photo you want to turn into an 8-second walkthrough.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Failed to generate renders.");
     } finally {
@@ -366,12 +390,13 @@ export function MoodboardApp({ initialProjectId }: { initialProjectId?: string |
 
     const selectedRenders = currentProject.renders.filter((render) => render.selected && render.status !== "pending");
     if (selectedRenders.length === 0) {
-      setStatus("Select at least one generated render for the walkthrough.");
+      setStatus("Select one generated render for the walkthrough.");
       return;
     }
+    const sourceRender = selectedRenders[0];
 
     setBusy("video");
-    setStatus("Starting walkthrough video jobs...");
+    setStatus("Starting one 8-second walkthrough video...");
 
     try {
       const response = await fetch("/api/generate-video", {
@@ -379,14 +404,16 @@ export function MoodboardApp({ initialProjectId }: { initialProjectId?: string |
         headers,
         body: JSON.stringify({
           projectId: currentProject.id,
-          images: selectedRenders.map((render) => ({
-            id: render.id,
-            url: render.url,
-            base64: render.base64,
-            mimeType: render.mimeType
-          })),
+          images: [
+            {
+              id: sourceRender.id,
+              url: sourceRender.url,
+              base64: sourceRender.base64,
+              mimeType: sourceRender.mimeType
+            }
+          ],
           prompt:
-            "Photo-realistic interior design showroom walkthrough. Keep the room minimal with plain warm walls, grounded furniture, consistent lighting, and restrained photographer-style camera movement."
+            "Photo-realistic 8-second interior design showroom walkthrough. Use one continuous slow front showroom push with a subtle left-to-right arc around the room. Keep plain warm walls, grounded furniture, consistent lighting, and restrained photographer-style camera movement."
         })
       });
       const data = await response.json();
@@ -398,6 +425,54 @@ export function MoodboardApp({ initialProjectId }: { initialProjectId?: string |
       await pollVideoJobs(data.jobs);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Failed to generate walkthrough.");
+      setBusy("idle");
+    }
+  }
+
+  function updateBudgetAmount(value: string) {
+    const nextAmount = value.trim() === "" ? null : Number(value);
+    if (nextAmount !== null && (!Number.isFinite(nextAmount) || nextAmount < 0)) return;
+    updateCurrentProject((project) => ({ ...project, budgetAmount: nextAmount }));
+  }
+
+  async function exportPresentation() {
+    if (!currentProject || busy !== "idle") return;
+    const headers = authHeaders();
+    if (!headers) return;
+    const canvasImage = canvasRef.current?.exportCanvas();
+    if (!canvasImage) {
+      setStatus("Canvas export failed. Try again after the canvas loads.");
+      return;
+    }
+
+    setBusy("exporting");
+    setStatus("Building presentation PDF...");
+    try {
+      const response = await fetch("/api/export-presentation", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          projectId: currentProject.id,
+          canvasImage,
+          renders: currentProject.renders.filter((render) => render.status !== "pending" && render.selected),
+          schedule: ffeSchedule,
+          budget: {
+            amount: currentProject.budgetAmount,
+            currency: currentProject.budgetCurrency
+          }
+        })
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({ error: "Failed to export presentation PDF." }));
+        throw new Error(data.error || "Failed to export presentation PDF.");
+      }
+      const blob = await response.blob();
+      const fileName = fileNameFromContentDisposition(response.headers.get("content-disposition")) ?? `${currentProject.name}.pdf`;
+      downloadBlob(blob, fileName);
+      setStatus("Presentation PDF downloaded.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Failed to export presentation PDF.");
+    } finally {
       setBusy("idle");
     }
   }
@@ -416,11 +491,18 @@ export function MoodboardApp({ initialProjectId }: { initialProjectId?: string |
       nextJobs = statuses;
       updateCurrentProject((project) => ({ ...project, videoJobs: statuses }));
       const completed = statuses.filter((job) => job.status === "succeeded").length;
-      setStatus(`Generating walkthrough clips... ${completed}/${statuses.length} complete`);
+      setStatus(`Generating 8-second walkthrough... ${completed}/${statuses.length} complete`);
     }
 
     if (nextJobs.some((job) => job.status === "failed")) {
-      setStatus("At least one walkthrough clip failed. Check the video job cards.");
+      setStatus("Walkthrough video failed. Check the video job card.");
+      setBusy("idle");
+      return;
+    }
+
+    if (nextJobs.length === 1 && nextJobs[0].videoUrl) {
+      updateCurrentProject((project) => ({ ...project, stitchedVideoUrl: nextJobs[0].videoUrl ?? null, videoJobs: nextJobs }));
+      setStatus("8-second walkthrough video is ready.");
       setBusy("idle");
       return;
     }
@@ -670,7 +752,7 @@ export function MoodboardApp({ initialProjectId }: { initialProjectId?: string |
             canUndo={undoStack.length > 0}
             onUndo={undoCanvasChange}
             onDropAsset={(assetId, position) => {
-              const asset = getFurnitureAssetFromList(assetId, uploadedAssets);
+              const asset = getFurnitureAssetFromList(assetId, allAssets);
               if (asset) addAssetToCanvas(asset, position);
             }}
           />
@@ -710,7 +792,11 @@ export function MoodboardApp({ initialProjectId }: { initialProjectId?: string |
 
             <RenderResults
               project={currentProject}
+              schedule={ffeSchedule}
+              isExporting={busy === "exporting"}
               onOpenPreview={() => setPreviewIndex(0)}
+              onBudgetChange={updateBudgetAmount}
+              onExportPresentation={() => void exportPresentation()}
               onToggleRender={(renderId) =>
                 updateCurrentProject((project) => ({
                   ...project,
@@ -815,37 +901,58 @@ function SetupMissing() {
 
 function RenderResults({
   project,
+  schedule,
+  isExporting,
   onOpenPreview,
+  onBudgetChange,
+  onExportPresentation,
   onToggleRender
 }: {
   project: MoodboardProject;
+  schedule: FFEScheduleSummary;
+  isExporting: boolean;
   onOpenPreview: () => void;
+  onBudgetChange: (value: string) => void;
+  onExportPresentation: () => void;
   onToggleRender: (renderId: string) => void;
 }) {
+  const budgetRemaining = project.budgetAmount === null ? null : project.budgetAmount - schedule.total;
+  const [view, setView] = useState<RightPanelView>("photos");
+  const budgetInputRef = useRef<HTMLInputElement>(null);
+  const completedRenderCount = project.renders.filter((render) => render.status !== "pending").length;
+  const scheduleItemCount = schedule.rows.reduce((sum, row) => sum + row.quantity, 0);
+  const isOverBudget = budgetRemaining !== null && budgetRemaining < 0;
   return (
-    <div className="asset-scrollbar min-h-0 flex-1 overflow-y-auto p-3">
-      <div className="border-b border-[var(--line)] pb-3">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-semibold text-[var(--foreground)]">Generated photos</p>
-          <p className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--surface-subtle)] px-1.5 text-[10px] font-semibold text-[var(--ink-muted)]">
-          {project.renders.filter((render) => render.status !== "pending").length}
-          </p>
-        </div>
-        <div className="mt-1.5">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
+      <div className="grid grid-cols-3 rounded-md border border-[var(--line)] bg-[var(--surface-subtle)] p-0.5">
+        <PanelTab active={view === "photos"} label="Photos" count={completedRenderCount} onClick={() => setView("photos")} />
+        <PanelTab active={view === "schedule"} label="Items" count={schedule.rows.length} onClick={() => setView("schedule")} />
+        <PanelTab active={view === "video"} label="Video" count={project.videoJobs.length} onClick={() => setView("video")} />
+      </div>
+
+      <div className="mt-3 min-h-0 flex-1 overflow-hidden">
+        {view === "photos" ? (
+          <section className="asset-scrollbar h-full overflow-y-auto pr-1">
           {project.renders.length === 0 ? (
-            <p className="text-[11px] font-medium leading-4 text-[var(--ink-muted)]">Your generations will appear here.</p>
+              <div className="rounded-md border border-dashed border-[var(--line)] bg-white px-3 py-8 text-center">
+                <p className="text-xs font-semibold text-[var(--foreground)]">Generated photos</p>
+                <p className="mt-1 text-[11px] leading-4 text-[var(--ink-muted)]">Your generations will appear here.</p>
+              </div>
           ) : (
-            <div className="grid grid-cols-4 gap-1">
-              {project.renders.map((render, index) => (
+            <div className="grid grid-cols-2 gap-1.5">
+              {project.renders.map((render, index) =>
                 render.status === "pending" ? (
                   <div
                     key={render.id}
-                    className="relative aspect-square overflow-hidden rounded-md border border-[var(--line)] bg-[var(--surface-subtle)]"
+                    className="relative aspect-video overflow-hidden rounded-md border border-[var(--line)] bg-[var(--surface-subtle)]"
                     title={`Generating version ${index + 1}`}
                   >
                     <div className="absolute inset-0 animate-pulse bg-gradient-to-r from-transparent via-white/55 to-transparent" />
                     <span className="absolute left-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-sm bg-white/70 px-1 text-[9px] font-semibold text-[var(--ink-muted)]">
                       {index + 1}
+                    </span>
+                    <span className="absolute inset-x-1 bottom-4 truncate text-center text-[8px] font-semibold text-[var(--ink-muted)]">
+                      {render.angleLabel}
                     </span>
                     <span className="absolute inset-x-1 bottom-1 h-1 rounded-full bg-white/70">
                       <span className="block h-full w-1/2 animate-pulse rounded-full bg-[var(--accent)]/45" />
@@ -856,7 +963,7 @@ function RenderResults({
                     key={render.id}
                     onClick={() => onToggleRender(render.id)}
                     title={`Version ${index + 1}${render.selected ? " selected" : ""}`}
-                    className={`group relative aspect-square overflow-hidden rounded-md border bg-white text-left transition ${
+                    className={`group relative aspect-video overflow-hidden rounded-md border bg-white text-left transition ${
                       render.selected ? "border-[var(--accent)] ring-1 ring-[var(--accent)]/25" : "border-[var(--line)]"
                     }`}
                   >
@@ -864,64 +971,184 @@ function RenderResults({
                       src={render.url}
                       alt={`Generated render ${index + 1}`}
                       fill
-                      sizes="64px"
+                      sizes="180px"
                       className="object-cover transition group-hover:scale-[1.03]"
                     />
                     <span className="absolute left-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-sm bg-black/60 px-1 text-[9px] font-semibold text-white">
                       {index + 1}
                     </span>
+                    <span className="absolute inset-x-1 bottom-1 truncate rounded-sm bg-black/55 px-1 py-0.5 text-center text-[8px] font-semibold text-white">
+                      {render.angleLabel ?? `Version ${index + 1}`}
+                    </span>
                     {render.selected ? (
-                      <span className="absolute bottom-1 right-1 h-2 w-2 rounded-full bg-[var(--accent)] ring-1 ring-white" />
+                      <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[var(--accent)] ring-1 ring-white" />
                     ) : null}
                   </button>
                 )
-              ))}
+              )}
             </div>
           )}
-        </div>
-      <button
-        onClick={onOpenPreview}
-        disabled={!project.renders.some((render) => render.status !== "pending")}
-          className="mt-3 flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-[var(--line)] text-[11px] font-semibold text-[var(--ink-muted)] transition enabled:hover:border-[var(--accent)] enabled:hover:text-[var(--accent)] disabled:opacity-55"
-        >
-          <Eye size={13} />
-          Preview
-        </button>
-      </div>
+            <button
+              onClick={onOpenPreview}
+              disabled={!project.renders.some((render) => render.status !== "pending")}
+              className="mt-3 flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-[var(--line)] bg-white text-[11px] font-semibold text-[var(--ink-muted)] transition enabled:hover:border-[var(--accent)] enabled:hover:text-[var(--accent)] disabled:opacity-55"
+            >
+              <Eye size={13} />
+              Preview
+            </button>
+          </section>
+        ) : null}
 
-      <div className="mt-3">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-semibold text-[var(--foreground)]">Video jobs</p>
-          <p className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--surface-subtle)] px-1.5 text-[10px] font-semibold text-[var(--ink-muted)]">
-            {project.videoJobs.length}
-          </p>
-        </div>
-        <div className="mt-1.5 space-y-1.5">
-          {project.videoJobs.map((job, index) => (
-            <div key={job.id} className="rounded-md border border-[var(--line)] bg-white p-2">
-              <div className="flex items-center justify-between">
-                <p className="text-[11px] font-semibold text-[var(--foreground)]">Clip {index + 1}</p>
-                <p className="text-[10px] capitalize text-[var(--ink-muted)]">{job.status}</p>
+        {view === "schedule" ? (
+          <section className="flex h-full min-h-0 flex-col">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-[var(--foreground)]">Items &amp; budget</p>
+              <p className="text-[10px] font-semibold text-[var(--ink-muted)]">{scheduleItemCount} items</p>
+            </div>
+
+            <div className="asset-scrollbar mt-2 min-h-0 max-h-[calc(100vh-360px)] flex-1 space-y-1.5 overflow-y-auto pr-1">
+              {schedule.rows.length === 0 ? (
+                <p className="rounded-md border border-dashed border-[var(--line)] bg-white px-3 py-6 text-center text-[11px] text-[var(--ink-muted)]">
+                  Add furniture to see items and pricing.
+                </p>
+              ) : (
+                schedule.rows.map((row) => (
+                  <div key={row.assetId} className="rounded-md border border-[var(--line)] bg-white px-2.5 py-2 shadow-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="min-w-0 truncate text-[11px] font-semibold leading-4 text-[var(--foreground)]">{row.name}</p>
+                      {row.totalPrice === null ? (
+                        <p className="shrink-0 rounded-full bg-[var(--accent)]/10 px-1.5 py-0.5 text-[9px] font-semibold text-[var(--accent)]">
+                          Pricing TBD
+                        </p>
+                      ) : (
+                        <p className="shrink-0 text-[10px] font-semibold leading-4 text-[var(--foreground)]">
+                          {formatMoney(row.totalPrice, row.currency)}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="sticky bottom-0 z-10 mt-auto shrink-0 space-y-2 bg-[var(--surface)] pb-1 pt-3">
+              <div className="grid grid-cols-2 gap-1.5">
+                <div className="flex h-16 flex-col justify-center rounded-md border border-[var(--line)] bg-white px-2.5">
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">Total</p>
+                  <p className="mt-1 truncate text-[13px] font-semibold leading-none text-[var(--foreground)]">
+                    {formatMoney(schedule.total, schedule.currency)}
+                  </p>
+                </div>
+                <label className="flex h-16 flex-col justify-center rounded-md border border-[var(--line)] bg-white px-2.5">
+                  <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]">Budget</span>
+                  <input
+                    ref={budgetInputRef}
+                    type="number"
+                    min="0"
+                    inputMode="decimal"
+                    value={project.budgetAmount ?? ""}
+                    onChange={(event) => onBudgetChange(event.target.value)}
+                    placeholder="Set target"
+                    className="budget-input mt-1 block w-full bg-transparent text-[13px] font-semibold leading-none text-[var(--foreground)] outline-none placeholder:font-normal placeholder:text-[var(--ink-muted)]"
+                  />
+                </label>
               </div>
-              {job.error ? <p className="mt-1.5 text-[10px] text-[var(--clay)]">{job.error}</p> : null}
-            </div>
-          ))}
-          {project.stitchedVideoUrl ? (
-            <div className="overflow-hidden rounded-md border border-[var(--line)] bg-white">
-              <video src={project.stitchedVideoUrl} controls className="aspect-video w-full bg-black" />
-              <a
-                href={project.stitchedVideoUrl}
-                download="gussy-walkthrough.mp4"
-                className="block px-2.5 py-2 text-[11px] font-semibold text-[var(--accent)]"
+              {isOverBudget ? (
+                <p className="text-[10px] font-semibold text-[var(--clay)]">
+                  Over budget by {formatMoney(Math.abs(budgetRemaining), project.budgetCurrency)}
+                </p>
+              ) : null}
+              <button
+                onClick={onExportPresentation}
+                disabled={isExporting || schedule.rows.length === 0}
+                className="flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-[var(--line)] bg-white text-[11px] font-semibold text-[var(--foreground)] transition enabled:hover:border-[var(--accent)] enabled:hover:text-[var(--accent)] disabled:opacity-55"
               >
-                Download walkthrough
-              </a>
+                {isExporting ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
+                Presentation PDF
+              </button>
             </div>
-          ) : null}
-        </div>
+          </section>
+        ) : null}
+
+        {view === "video" ? (
+          <section className="asset-scrollbar h-full overflow-y-auto pr-1">
+            {project.videoJobs.length === 0 && !project.stitchedVideoUrl ? (
+              <p className="rounded-md border border-dashed border-[var(--line)] bg-white px-3 py-8 text-center text-[11px] text-[var(--ink-muted)]">
+                Video jobs will appear here after you run Walkthrough Video.
+              </p>
+            ) : null}
+            <div className="space-y-1.5">
+              {project.videoJobs.map((job, index) => (
+                <div key={job.id} className="rounded-md border border-[var(--line)] bg-white p-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] font-semibold text-[var(--foreground)]">Clip {index + 1}</p>
+                    <p className="text-[10px] capitalize text-[var(--ink-muted)]">{job.status}</p>
+                  </div>
+                  {job.error ? <p className="mt-1.5 text-[10px] text-[var(--clay)]">{job.error}</p> : null}
+                </div>
+              ))}
+              {project.stitchedVideoUrl ? (
+                <div className="overflow-hidden rounded-md border border-[var(--line)] bg-white">
+                  <video src={project.stitchedVideoUrl} controls className="aspect-video w-full bg-black" />
+                  <a
+                    href={project.stitchedVideoUrl}
+                    download="gussy-walkthrough.mp4"
+                    className="block px-2.5 py-2 text-[11px] font-semibold text-[var(--accent)]"
+                  >
+                    Download walkthrough
+                  </a>
+                </div>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
       </div>
     </div>
   );
+}
+
+function PanelTab({
+  active,
+  label,
+  count,
+  onClick
+}: {
+  active: boolean;
+  label: string;
+  count: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex h-7 items-center justify-center gap-1 rounded text-[10px] font-semibold transition ${
+        active ? "bg-white text-[var(--foreground)] shadow-sm" : "text-[var(--ink-muted)] hover:text-[var(--foreground)]"
+      }`}
+    >
+      {label}
+      <span className={active ? "text-[var(--accent)]" : "text-[var(--ink-muted)]"}>{count}</span>
+    </button>
+  );
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = sanitizeDownloadFileName(fileName);
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function fileNameFromContentDisposition(header: string | null) {
+  return header?.match(/filename="([^"]+)"/)?.[1] ?? null;
+}
+
+function sanitizeDownloadFileName(value: string) {
+  const clean = value.replace(/[/\\?%*:|"<>]/g, "-").replace(/\s+/g, " ").trim();
+  return clean.toLowerCase().endsWith(".pdf") ? clean : `${clean || "gussy-presentation"}.pdf`;
 }
 
 function RenderPreviewModal({
@@ -945,7 +1172,7 @@ function RenderPreviewModal({
       <div className="flex h-14 flex-none items-center justify-between border-b border-white/10 px-4 sm:px-6">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/55">Preview</p>
-          <p className="text-sm font-semibold">Version {index + 1} of {renders.length}</p>
+          <p className="text-sm font-semibold">{render.angleLabel ?? `Version ${index + 1}`} · {index + 1} of {renders.length}</p>
         </div>
         <button
           onClick={onClose}

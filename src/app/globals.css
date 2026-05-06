@@ -1,16 +1,16 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f5f4ef;
-  --foreground: #26221e;
-  --surface: #fffefa;
-  --surface-subtle: #ebe8df;
-  --line: #d7d1c4;
-  --ink-muted: #6f695f;
-  --accent: #315c57;
-  --accent-strong: #23423f;
-  --clay: #9b6650;
-  --sage: #8a9677;
+  --background: #fcf9f6;
+  --foreground: #33332b;
+  --surface: #fff;
+  --surface-subtle: #fff7f4;
+  --line: #efebeb;
+  --ink-muted: #878787;
+  --accent: #d0765b;
+  --accent-strong: #ac4c3e;
+  --clay: #ac4c3e;
+  --sage: #a2a29a;
 }
 
 * {
@@ -46,5 +46,15 @@ button:disabled {
 
 .asset-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: #b9b1a3 transparent;
+  scrollbar-color: #d0765b transparent;
+}
+
+.budget-input {
+  appearance: textfield;
+}
+
+.budget-input::-webkit-outer-spin-button,
+.budget-input::-webkit-inner-spin-button {
+  margin: 0;
+  appearance: none;
 }

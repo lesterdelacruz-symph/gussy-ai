@@ -5,6 +5,18 @@ export interface FurnitureAsset {
   src: string;
   naturalWidth?: number;
   naturalHeight?: number;
+  catalog?: boolean;
+  firebaseDocId?: string;
+  sku?: string | null;
+  supplier?: string | null;
+  dimensions?: string | null;
+  material?: string | null;
+  colors?: string | null;
+  tags?: string | null;
+  currency?: string;
+  retailPrice?: number | null;
+  salePrice?: number | null;
+  displayPrice?: number | null;
   uploaded?: boolean;
   backgroundRemoved?: boolean;
   backgroundProcessing?: boolean;
@@ -39,6 +51,7 @@ export interface GeneratedRender {
   selected: boolean;
   createdAt: string;
   status?: "pending" | "succeeded";
+  angleLabel?: string;
 }
 
 export interface ImageReference {
@@ -59,10 +72,13 @@ export interface MoodboardProject {
   name: string;
   createdAt: string;
   updatedAt: string;
+  budgetAmount: number | null;
+  budgetCurrency: string;
   canvas: CanvasState;
   renders: GeneratedRender[];
   videoJobs: VideoJob[];
   stitchedVideoUrl: string | null;
+  presentationUrl: string | null;
 }
 
 export interface ProjectSummary {

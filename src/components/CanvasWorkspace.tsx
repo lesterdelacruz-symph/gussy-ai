@@ -255,12 +255,8 @@ export const CanvasWorkspace = forwardRef<CanvasWorkspaceRef, CanvasWorkspacePro
                     rotateEnabled
                     enabledAnchors={[
                       "top-left",
-                      "top-center",
                       "top-right",
-                      "middle-left",
-                      "middle-right",
                       "bottom-left",
-                      "bottom-center",
                       "bottom-right"
                     ]}
                     boundBoxFunc={(_, newBox) => {
@@ -432,7 +428,7 @@ function CanvasImageItem({
       scaleY={item.scaleY}
       draggable
       shadowEnabled={selected}
-      shadowColor="#315c57"
+      shadowColor="#d0765b"
       shadowBlur={selected ? 14 : 0}
       onClick={onSelect}
       onTap={onSelect}

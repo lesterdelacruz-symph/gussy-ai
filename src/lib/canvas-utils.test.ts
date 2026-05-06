@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createCanvasItem, defaultItemSize } from "./canvas-utils";
+import { createCanvasItem, defaultItemSize, repairCanvasItemAspectRatio } from "./canvas-utils";
 
 describe("canvas sizing", () => {
   it("fits source assets inside category boxes without changing their natural aspect ratio", () => {
@@ -25,5 +25,25 @@ describe("canvas sizing", () => {
 
     const item = createCanvasItem(wideAsset, { x: 10, y: 20, zIndex: 0 });
     expect(item.width / item.height).toBeCloseTo(1408 / 768, 2);
+  });
+
+  it("repairs a distorted canvas item while keeping its center position", () => {
+    const asset = {
+      id: "catalog:side-table",
+      name: "Side Table",
+      category: "tables",
+      src: "https://example.com/side-table.webp",
+      naturalWidth: 650,
+      naturalHeight: 686
+    };
+
+    const repaired = repairCanvasItemAspectRatio(
+      { id: "item-1", assetId: asset.id, x: 100, y: 200, width: 320, height: 120, rotation: 0, scaleX: 1, scaleY: 1, zIndex: 0 },
+      asset
+    );
+
+    expect(repaired.width / repaired.height).toBeCloseTo(650 / 686, 2);
+    expect(repaired.x + repaired.width / 2).toBeCloseTo(260, 0);
+    expect(repaired.y + repaired.height / 2).toBeCloseTo(260, 0);
   });
 });

@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CanvasItem, GeneratedRender, MoodboardProject, ProjectSummary, VideoJob } from "./types";
 
-export type MediaKind = "render_image" | "video_clip" | "walkthrough_video";
+export type MediaKind = "render_image" | "video_clip" | "walkthrough_video" | "presentation_pdf";
 export type MediaStatus = "pending" | "processing" | "succeeded" | "failed";
 
 export interface SupabaseProjectRow {
@@ -12,6 +12,8 @@ export interface SupabaseProjectRow {
   canvas_height: number;
   canvas_background: string;
   status: "draft" | "archived";
+  budget_amount: number | string | null;
+  budget_currency: string;
   created_at: string;
   updated_at: string;
   canvas_items?: SupabaseCanvasItemRow[];
@@ -43,6 +45,7 @@ export interface SupabaseGeneratedMediaRow {
   variation_index: number | null;
   created_at: string;
   error: string | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface SupabaseProfileRow {
@@ -59,6 +62,8 @@ const PROJECT_SELECT = `
   canvas_height,
   canvas_background,
   status,
+  budget_amount,
+  budget_currency,
   created_at,
   updated_at,
   canvas_items (
@@ -83,6 +88,7 @@ const PROJECT_SELECT = `
     prompt,
     model,
     variation_index,
+    metadata,
     created_at,
     error
   )
@@ -98,6 +104,8 @@ export function projectToSupabaseRows(project: MoodboardProject, userId: string)
       canvas_height: project.canvas.height,
       canvas_background: project.canvas.background,
       status: "draft" as const,
+      budget_amount: project.budgetAmount,
+      budget_currency: project.budgetCurrency,
       created_at: project.createdAt,
       updated_at: project.updatedAt
     },
@@ -137,6 +145,8 @@ export function projectFromSupabaseRows(row: SupabaseProjectRow): MoodboardProje
     name: row.name,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    budgetAmount: row.budget_amount === null || row.budget_amount === undefined ? null : Number(row.budget_amount),
+    budgetCurrency: row.budget_currency ?? "PHP",
     canvas: {
       width: row.canvas_width,
       height: row.canvas_height,
@@ -148,7 +158,8 @@ export function projectFromSupabaseRows(row: SupabaseProjectRow): MoodboardProje
     },
     renders: mediaToGeneratedRenders(media),
     videoJobs: videoState.videoJobs,
-    stitchedVideoUrl: videoState.stitchedVideoUrl
+    stitchedVideoUrl: videoState.stitchedVideoUrl,
+    presentationUrl: mediaToPresentationUrl(media)
   };
 }
 
@@ -182,7 +193,8 @@ export function mediaToGeneratedRenders(media: SupabaseGeneratedMediaRow[]): Gen
       prompt: item.prompt ?? "",
       selected: true,
       createdAt: item.created_at,
-      status: "succeeded"
+      status: "succeeded",
+      angleLabel: typeof item.metadata?.angleLabel === "string" ? item.metadata.angleLabel : undefined
     }));
 }
 
@@ -208,14 +220,30 @@ export function mediaToVideoState(media: SupabaseGeneratedMediaRow[]): {
   return { videoJobs, stitchedVideoUrl: stitchedVideo };
 }
 
+export function mediaToPresentationUrl(media: SupabaseGeneratedMediaRow[]) {
+  return (
+    media
+      .filter((item) => item.kind === "presentation_pdf" && item.status === "succeeded")
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))[0]?.public_url ?? null
+  );
+}
+
 export function storagePathForMedia(
   userId: string,
   projectId: string,
-  folder: "renders" | "videos",
+  folder: "renders" | "videos" | "presentations",
   mediaId: string,
   mimeType: string
 ) {
-  const extension = mimeType.includes("png") ? "png" : mimeType.includes("webp") ? "webp" : mimeType.includes("mp4") ? "mp4" : "jpg";
+  const extension = mimeType.includes("pdf")
+    ? "pdf"
+    : mimeType.includes("png")
+      ? "png"
+      : mimeType.includes("webp")
+        ? "webp"
+        : mimeType.includes("mp4")
+          ? "mp4"
+          : "jpg";
   return `${userId}/${projectId}/${folder}/${mediaId}.${extension}`;
 }
 
@@ -285,15 +313,18 @@ export async function createRemoteProject(client: SupabaseClient, userId: string
     name,
     createdAt: now,
     updatedAt: now,
+    budgetAmount: null,
+    budgetCurrency: "PHP",
     canvas: {
       width: 1400,
       height: 900,
-      background: "#f7f3ea",
+      background: "#fff7f4",
       items: []
     },
     renders: [],
     videoJobs: [],
-    stitchedVideoUrl: null
+    stitchedVideoUrl: null,
+    presentationUrl: null
   };
   await saveRemoteProjectSnapshot(client, userId, project);
   await saveLastActiveProjectId(client, userId, project.id);

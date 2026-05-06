@@ -5,6 +5,8 @@ build/
 coverage/
 .playwright-cli/
 output/
+tmp/
+.DS_Store
 .env*.local
 .env
 public/generated/

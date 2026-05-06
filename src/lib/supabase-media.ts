@@ -7,7 +7,7 @@ export async function uploadProjectMedia(input: {
   userId: string;
   projectId: string;
   mediaId: string;
-  folder: "renders" | "videos";
+  folder: "renders" | "videos" | "presentations";
   kind: MediaKind;
   status?: MediaStatus;
   bytes: Buffer;

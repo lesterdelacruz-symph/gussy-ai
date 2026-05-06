@@ -18,7 +18,7 @@ export interface UploadedAssetRow {
 export function uploadedAssetFromRow(row: UploadedAssetRow): FurnitureAsset {
   return {
     id: row.id,
-    name: row.name,
+    name: displayUploadedAssetName(row.name, row.id),
     category: "uploads",
     src: row.public_url,
     naturalWidth: row.natural_width ?? undefined,
@@ -26,6 +26,12 @@ export function uploadedAssetFromRow(row: UploadedAssetRow): FurnitureAsset {
     uploaded: true,
     backgroundRemoved: row.background_removed
   };
+}
+
+export function displayUploadedAssetName(name: string | null | undefined, id: string) {
+  const trimmed = name?.trim();
+  if (!trimmed || trimmed === id || /^upload_[0-9a-f-]{20,}$/i.test(trimmed)) return "Uploaded asset";
+  return trimmed;
 }
 
 export async function listUploadedAssets(client: SupabaseClient): Promise<FurnitureAsset[]> {

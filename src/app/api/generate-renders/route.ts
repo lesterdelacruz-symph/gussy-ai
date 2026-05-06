@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import { generateInteriorRender } from "@/lib/image-generation";
+import { renderAngleLabel } from "@/lib/prompt-builder";
 import { uploadProjectMedia } from "@/lib/supabase-media";
 import { SUPABASE_STORAGE_BUCKET } from "@/lib/supabase-config";
 import { mediaToGeneratedRenders, type SupabaseGeneratedMediaRow } from "@/lib/supabase-project-store";
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest) {
     await assertProjectOwner(projectId, user.id, client);
     const { data, error } = await client
       .from("generated_media")
-      .select("id, kind, status, public_url, mime_type, prompt, model, variation_index, created_at, error")
+      .select("id, kind, status, public_url, mime_type, prompt, model, variation_index, metadata, created_at, error")
       .eq("project_id", projectId)
       .eq("kind", "render_image")
       .order("variation_index", { ascending: true })
@@ -93,6 +94,7 @@ export async function POST(request: NextRequest) {
         prompt: result.prompt,
         model: result.model,
         variationIndex: index,
+        metadata: { angleLabel: renderAngleLabel(index) },
         client
       });
       images.push({
@@ -101,7 +103,8 @@ export async function POST(request: NextRequest) {
         mimeType: result.mimeType,
         prompt: result.prompt,
         selected: true,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        angleLabel: renderAngleLabel(index)
       });
     }
 

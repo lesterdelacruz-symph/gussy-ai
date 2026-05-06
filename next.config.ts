@@ -7,6 +7,16 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "kzgrpjijmsslmevpgtsk.supabase.co",
         pathname: "/storage/v1/object/public/project-media/**"
+      },
+      {
+        protocol: "https",
+        hostname: "kzgrpjijmsslmevpgtsk.supabase.co",
+        pathname: "/storage/v1/object/public/catalog-assets/**"
+      },
+      {
+        protocol: "https",
+        hostname: "firebasestorage.googleapis.com",
+        pathname: "/v0/b/project-gussy.appspot.com/o/**"
       }
     ]
   },

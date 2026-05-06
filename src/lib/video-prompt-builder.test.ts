@@ -13,20 +13,22 @@ describe("buildWalkthroughVideoPrompt", () => {
   it("uses a structured contract that preserves the still image design", () => {
     const prompt = buildWalkthroughVideoPrompt({
       clipIndex: 1,
-      clipCount: 4,
+      clipCount: 1,
       basePrompt: "Warm showroom walkthrough."
     });
     const payload = parseStructuredPayload(prompt);
 
     expect(prompt).toMatch(/^INTERIOR WALKTHROUGH VIDEO BRIEF/);
     expect(prompt).toContain("Warm showroom walkthrough.");
-    expect(payload.task).toBe("generate_interior_walkthrough_clip");
+    expect(payload.task).toBe("generate_single_8_second_interior_walkthrough");
     expect(payload.clip).toMatchObject({
       index: 1,
-      count: 4,
-      shot: "front_anchor_dolly",
+      count: 1,
+      shot: "continuous_showroom_walkthrough",
       durationSeconds: 8
     });
+    expect(payload.cameraDirection.movement).toContain("slow front showroom push");
+    expect(payload.cameraDirection.movement).toContain("subtle left-to-right arc");
     expect(payload.sourceImageUse).toMatchObject({
       preserveStillImageAsCanonicalReference: true,
       cameraMayMoveButSceneMustRemainTheSameRoom: true,
@@ -41,26 +43,15 @@ describe("buildWalkthroughVideoPrompt", () => {
     );
   });
 
-  it("gives the second clip a noticeably closer front sofa push-in", () => {
+  it("ignores extra selected images and keeps the prompt as one continuous walkthrough", () => {
     const payload = parseStructuredPayload(
       buildWalkthroughVideoPrompt({
-        clipIndex: 2,
+        clipIndex: 3,
         clipCount: 4
       })
     );
 
-    expect(payload.clip.shot).toBe("front_sofa_push_in");
-    expect(payload.cameraDirection.movement).toContain("push in more noticeably toward the sofa");
-    expect(payload.cameraDirection.movement).toContain("25-35% closer");
-  });
-
-  it("keeps later clips in the same front-oriented family for stitching continuity", () => {
-    const third = parseStructuredPayload(buildWalkthroughVideoPrompt({ clipIndex: 3, clipCount: 4 }));
-    const fourth = parseStructuredPayload(buildWalkthroughVideoPrompt({ clipIndex: 4, clipCount: 4 }));
-
-    expect(third.cameraDirection.movement).toContain("similar front orientation");
-    expect(fourth.cameraDirection.movement).toContain("similar front orientation");
-    expect(third.cameraDirection.continuity).toContain("consistent with the other clips");
-    expect(fourth.cameraDirection.continuity).toContain("consistent with the other clips");
+    expect(payload.clip).toMatchObject({ index: 1, count: 1, durationSeconds: 8 });
+    expect(payload.cameraDirection.continuity).toContain("single uninterrupted take");
   });
 });

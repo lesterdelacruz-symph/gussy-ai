@@ -8,7 +8,7 @@ export const ACTIVE_PROJECT_KEY = "gussy:activeProjectId";
 const DEFAULT_CANVAS = {
   width: 1400,
   height: 900,
-  background: "#f7f3ea"
+  background: "#fff7f4"
 };
 
 interface CreateProjectInput {
@@ -30,13 +30,16 @@ export function createProject(input: CreateProjectInput = {}): MoodboardProject 
     name: input.name?.trim() || "Untitled Project",
     createdAt: now,
     updatedAt: now,
+    budgetAmount: null,
+    budgetCurrency: "PHP",
     canvas: {
       ...DEFAULT_CANVAS,
       items: []
     },
     renders: [],
     videoJobs: [],
-    stitchedVideoUrl: null
+    stitchedVideoUrl: null,
+    presentationUrl: null
   };
 }
 
@@ -97,7 +100,12 @@ export function saveProject(storage: Storage, project: MoodboardProject) {
 export function loadProject(storage: Storage, id: string): MoodboardProject | null {
   const project = readJson<MoodboardProject | null>(storage, projectKey(id), null);
   if (!project) return null;
-  return repairProjectAspectRatios(project);
+  return repairProjectAspectRatios({
+    ...project,
+    budgetAmount: project.budgetAmount ?? null,
+    budgetCurrency: project.budgetCurrency ?? "PHP",
+    presentationUrl: project.presentationUrl ?? null
+  });
 }
 
 export function saveActiveProjectId(storage: Storage, id: string) {

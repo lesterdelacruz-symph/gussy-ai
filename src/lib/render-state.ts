@@ -1,4 +1,5 @@
 import type { GeneratedRender, MoodboardProject } from "./types";
+import { renderAngleLabel } from "./prompt-builder";
 
 export function beginRenderGeneration(project: MoodboardProject): MoodboardProject {
   return {
@@ -10,7 +11,8 @@ export function beginRenderGeneration(project: MoodboardProject): MoodboardProje
       prompt: "",
       selected: false,
       createdAt: new Date().toISOString(),
-      status: "pending" as const
+      status: "pending" as const,
+      angleLabel: renderAngleLabel(index + 1)
     })),
     videoJobs: [],
     stitchedVideoUrl: null

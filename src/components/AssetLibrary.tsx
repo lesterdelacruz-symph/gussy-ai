@@ -2,8 +2,8 @@
 
 import { Loader2, Search, Trash2 } from "lucide-react";
 import Image from "next/image";
-import { useMemo, useState } from "react";
-import { furnitureCategories } from "@/lib/furniture-assets";
+import { useDeferredValue, useMemo, useState } from "react";
+import { formatMoney } from "@/lib/ffe-schedule";
 import type { FurnitureAsset } from "@/lib/types";
 
 interface AssetLibraryProps {
@@ -14,33 +14,45 @@ interface AssetLibraryProps {
   canClearCanvas: boolean;
 }
 
+const ASSET_PAGE_SIZE = 96;
+
 export function AssetLibrary({ assets, onAddAsset, onDeleteUpload, onClearCanvas, canClearCanvas }: AssetLibraryProps) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
+  const [visiblePagesByFilter, setVisiblePagesByFilter] = useState<Record<string, number>>({});
+  const deferredQuery = useDeferredValue(query);
+  const filterKey = `${assets.length}:${category}:${deferredQuery.trim().toLowerCase()}`;
+  const visibleCount = (visiblePagesByFilter[filterKey] ?? 1) * ASSET_PAGE_SIZE;
 
   const filteredAssets = useMemo(() => {
-    const lower = query.trim().toLowerCase();
+    const lower = deferredQuery.trim().toLowerCase();
     return assets.filter((asset) => {
       const matchesCategory = category === "all" || asset.category === category;
       const matchesQuery =
         !lower || asset.name.toLowerCase().includes(lower) || asset.category.toLowerCase().includes(lower);
       return matchesCategory && matchesQuery;
     });
-  }, [assets, category, query]);
-  const categoryCounts = useMemo(
-    () =>
-      assets.reduce<Record<string, number>>(
-        (counts, asset) => ({
-          ...counts,
-          [asset.category]: (counts[asset.category] ?? 0) + 1
-        }),
-        { all: assets.length }
-      ),
-    [assets]
-  );
+  }, [assets, category, deferredQuery]);
+
+  const visibleAssets = useMemo(() => filteredAssets.slice(0, visibleCount), [filteredAssets, visibleCount]);
+  const remainingAssets = Math.max(0, filteredAssets.length - visibleAssets.length);
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: assets.length };
+    for (const asset of assets) {
+      counts[asset.category] = (counts[asset.category] ?? 0) + 1;
+    }
+    return counts;
+  }, [assets]);
+
   const categories = useMemo(
-    () => ["all", ...furnitureCategories, ...(categoryCounts.uploads ? ["uploads"] : ["uploads"])],
-    [categoryCounts.uploads]
+    () => [
+      "all",
+      ...["decor", "lighting", "rugs", "seating", "storage", "tables", "products", "uploads"].filter(
+        (item) => (categoryCounts[item] ?? 0) > 0 || item === "uploads"
+      )
+    ],
+    [categoryCounts]
   );
 
   return (
@@ -78,7 +90,7 @@ export function AssetLibrary({ assets, onAddAsset, onDeleteUpload, onClearCanvas
           <button
             onClick={onClearCanvas}
             disabled={!canClearCanvas}
-            className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-[var(--clay)]/35 bg-white px-3 text-sm font-semibold text-[var(--clay)] transition enabled:hover:border-[var(--clay)] enabled:hover:bg-[#fff7f3] disabled:border-[var(--line)] disabled:text-[var(--ink-muted)] disabled:opacity-50"
+            className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-[var(--clay)]/35 bg-white px-3 text-sm font-semibold text-[var(--clay)] transition enabled:hover:border-[var(--clay)] enabled:hover:bg-[var(--surface-subtle)] disabled:border-[var(--line)] disabled:text-[var(--ink-muted)] disabled:opacity-50"
           >
             <Trash2 size={13} />
             Clear canvas
@@ -86,7 +98,7 @@ export function AssetLibrary({ assets, onAddAsset, onDeleteUpload, onClearCanvas
         </div>
 
         <div className="asset-scrollbar mt-2 flex min-h-0 min-w-0 max-w-full flex-1 gap-2 overflow-x-auto">
-          {filteredAssets.map((asset, index) => (
+          {visibleAssets.map((asset, index) => (
             <button
               key={asset.id}
               draggable
@@ -129,8 +141,27 @@ export function AssetLibrary({ assets, onAddAsset, onDeleteUpload, onClearCanvas
               <span className="truncate text-[11px] font-semibold leading-4 text-[var(--foreground)]">
                 {asset.backgroundProcessing ? "Removing BG..." : asset.name}
               </span>
+              {asset.displayPrice !== null && asset.displayPrice !== undefined ? (
+                <span className="truncate text-[10px] font-medium leading-3 text-[var(--ink-muted)]">
+                  {formatMoney(asset.displayPrice, asset.currency)}
+                </span>
+              ) : null}
             </button>
           ))}
+          {remainingAssets > 0 ? (
+            <button
+              onClick={() =>
+                setVisiblePagesByFilter((pages) => ({
+                  ...pages,
+                  [filterKey]: (pages[filterKey] ?? 1) + 1
+                }))
+              }
+              className="flex h-full w-28 shrink-0 flex-col items-center justify-center rounded-md border border-dashed border-[var(--line)] bg-[var(--background)] p-2 text-center text-xs font-semibold text-[var(--ink-muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+            >
+              <span>Show more</span>
+              <span className="mt-1 text-[10px] font-medium">{remainingAssets} left</span>
+            </button>
+          ) : null}
         </div>
       </div>
     </aside>

@@ -6,6 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { listDesignerCatalogAssets } from "@/lib/catalog-loader";
 import { getFurnitureAssetFromList } from "@/lib/furniture-assets";
 import {
   createRemoteProject,
@@ -26,6 +27,7 @@ export function ProjectsGallery() {
   const [authReady, setAuthReady] = useState(!supabase);
   const [projects, setProjects] = useState<MoodboardProject[]>([]);
   const [uploadedAssets, setUploadedAssets] = useState<FurnitureAsset[]>([]);
+  const [catalogAssets, setCatalogAssets] = useState<FurnitureAsset[]>([]);
   const [status, setStatus] = useState("Loading projects...");
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -37,7 +39,9 @@ export function ProjectsGallery() {
       const fullProjects = (
         await Promise.all(summaries.map((summary) => loadRemoteProject(client, summary.id)))
       ).filter((project): project is MoodboardProject => Boolean(project));
-      setUploadedAssets(await listUploadedAssets(client));
+      const [uploads, catalog] = await Promise.all([listUploadedAssets(client), listDesignerCatalogAssets(client)]);
+      setUploadedAssets(uploads);
+      setCatalogAssets(catalog);
       setProjects(fullProjects);
       setStatus(fullProjects.length === 0 ? "No projects yet." : "Projects loaded.");
     } catch (error) {
@@ -97,6 +101,7 @@ export function ProjectsGallery() {
     await supabase.auth.signOut();
     setProjects([]);
     setUploadedAssets([]);
+    setCatalogAssets([]);
     router.push("/");
   }
 
@@ -212,7 +217,7 @@ export function ProjectsGallery() {
               className="group overflow-hidden rounded-md border border-[var(--line)] bg-[var(--surface)] transition hover:-translate-y-0.5 hover:border-[var(--accent)]"
             >
               <button onClick={() => void openProject(project.id)} className="block w-full text-left">
-                <ProjectCanvasPreview canvas={project.canvas} assets={uploadedAssets} />
+                <ProjectCanvasPreview canvas={project.canvas} assets={[...uploadedAssets, ...catalogAssets]} />
               </button>
               <div className="flex items-center justify-between gap-3 border-t border-[var(--line)] px-3 py-2">
                 <button onClick={() => void openProject(project.id)} className="min-w-0 text-left">

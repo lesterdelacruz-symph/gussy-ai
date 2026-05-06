@@ -2,6 +2,17 @@ import type { CanvasState, FurnitureAsset } from "./types";
 
 const FLOOR_SUPPORTED_CATEGORIES = new Set(["seating", "tables", "rugs", "storage"]);
 
+export const RENDER_ANGLE_LABELS = [
+  "Front showroom wide",
+  "Sofa detail zoom",
+  "Left-side perspective",
+  "Front-right catalog angle"
+];
+
+export function renderAngleLabel(index: number) {
+  return RENDER_ANGLE_LABELS[index - 1] ?? `Version ${index}`;
+}
+
 export function buildRenderPrompt(_input: {
   projectId: string;
   canvasState: CanvasState;
@@ -157,6 +168,7 @@ function cameraPlanForVariation(index: number) {
   const plans = [
     {
       index: 1,
+      label: renderAngleLabel(1),
       role: "front_angle_anchor",
       shot:
         "Straight-on front showroom angle. Eye-level 28-35mm interior lens, wide enough to include the whole furniture arrangement, wall-floor junction, rug/table relationship, and sofa as the visual anchor. Keep verticals clean and the room facing mostly forward.",
@@ -165,6 +177,7 @@ function cameraPlanForVariation(index: number) {
     },
     {
       index: 2,
+      label: renderAngleLabel(2),
       role: "front_sofa_zoom",
       shot:
         "Noticeably zoomed-in front-facing sofa vignette. Move the camera 35-45 percent closer than version 1 and crop tighter around the sofa, coffee table edge, and rug texture, while keeping enough wall/floor context to read as the same room. The zoom should be obvious.",
@@ -173,6 +186,7 @@ function cameraPlanForVariation(index: number) {
     },
     {
       index: 3,
+      label: renderAngleLabel(3),
       role: "front_left_soft_angle",
       shot:
         "Mostly front-facing angle with a subtle left offset, like a photographer stepping a little left while still facing the room. Show gentle depth across the arrangement without making it look like a different room.",
@@ -181,6 +195,7 @@ function cameraPlanForVariation(index: number) {
     },
     {
       index: 4,
+      label: renderAngleLabel(4),
       role: "front_right_catalog_angle",
       shot:
         "Mostly front-facing angle with a subtle right offset and slightly lower catalog-photography camera. Emphasize floor contact, table/rug texture, sofa volume, and realistic shadows while keeping the front orientation.",

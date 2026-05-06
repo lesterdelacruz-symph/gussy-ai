@@ -5,7 +5,7 @@ import type { CanvasState, FurnitureAsset } from "./types";
 const canvasState: CanvasState = {
   width: 1400,
   height: 900,
-  background: "#f7f3ea",
+  background: "#fff7f4",
   items: [
     {
       id: "item-1",

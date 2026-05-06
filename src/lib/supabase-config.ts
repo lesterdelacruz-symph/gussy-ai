@@ -1,5 +1,6 @@
 export const SUPABASE_PROJECT_ID = "kzgrpjijmsslmevpgtsk";
 export const SUPABASE_STORAGE_BUCKET = "project-media";
+export const SUPABASE_CATALOG_BUCKET = "catalog-assets";
 
 export function getSupabaseUrl() {
   return process.env.NEXT_PUBLIC_SUPABASE_URL || `https://${SUPABASE_PROJECT_ID}.supabase.co`;

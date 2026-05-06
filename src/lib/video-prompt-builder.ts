@@ -4,44 +4,15 @@ export interface WalkthroughVideoPromptInput {
   basePrompt?: string;
 }
 
-const CLIP_DIRECTIONS = [
-  {
-    shot: "front_anchor_dolly",
-    cameraMove:
-      "Start from the same front-facing showroom composition as the source still. Make a very slow forward dolly, straight line, no pan, no rotation, no orbit.",
-    focus: "Establish the whole interior arrangement with the sofa, rug, table, lighting, and storage pieces staying locked in their source positions."
-  },
-  {
-    shot: "front_sofa_push_in",
-    cameraMove:
-      "Keep the front-facing orientation, then push in more noticeably toward the sofa, coffee table, and rug. The camera may move 25-35% closer, but must not crop away the room context abruptly.",
-    focus: "Create a closer designer detail view of upholstery texture, rug pattern, tabletop material, contact shadows, and floor reflections."
-  },
-  {
-    shot: "front_left_glide",
-    cameraMove:
-      "Begin from a similar front orientation with a subtle left-side vantage. Glide gently from left toward center with mild parallax, keeping vertical lines stable.",
-    focus: "Show depth between the storage piece, sofa, table, rug, and floor lighting while preserving the original layout."
-  },
-  {
-    shot: "front_right_catalog_push",
-    cameraMove:
-      "Begin from a similar front orientation with a subtle right-side vantage. Use a restrained right-to-left catalog push with a slightly lower eye level.",
-    focus: "Emphasize floor contact, realistic shadows, material response, and the relationship between the table, sofa, rug, and lamps."
-  }
-];
-
 export function buildWalkthroughVideoPrompt(input: WalkthroughVideoPromptInput) {
-  const clipIndex = clampIndex(input.clipIndex);
-  const direction = CLIP_DIRECTIONS[(clipIndex - 1) % CLIP_DIRECTIONS.length];
   const brief = input.basePrompt?.trim() || "Photo-realistic interior design showroom walkthrough.";
 
   const contract = {
-    task: "generate_interior_walkthrough_clip",
+    task: "generate_single_8_second_interior_walkthrough",
     clip: {
-      index: clipIndex,
-      count: Math.max(1, input.clipCount),
-      shot: direction.shot,
+      index: 1,
+      count: 1,
+      shot: "continuous_showroom_walkthrough",
       durationSeconds: 8
     },
     sourceImageUse: {
@@ -50,12 +21,16 @@ export function buildWalkthroughVideoPrompt(input: WalkthroughVideoPromptInput) 
       doNotRecomposeFurnitureLayout: true
     },
     cameraDirection: {
-      movement: direction.cameraMove,
-      focus: direction.focus,
-      continuity: "Keep orientation, scale relationships, lens feel, wall color, floor plane, and lighting family consistent with the other clips."
+      movement:
+        "Create one slow front showroom push that gently glides into the room, with a subtle left-to-right arc around the seating area and mild parallax. Start wide enough to show the whole layout, move 15-25% closer by the end, and keep the camera height at natural standing eye level.",
+      focus:
+        "The motion should feel like a luxury interior photographer walking around the room: reveal depth between sofa, table, rug, storage, and lighting while keeping the original composition recognizable.",
+      continuity:
+        "Make this a single uninterrupted take from one source still. No clip sequence, no scene change, no hard cut, and no stitched-transition feeling."
     },
     integrityRules: [
       "Single continuous shot, no cuts.",
+      "Generate exactly one 8-second video, not multiple alternate clips.",
       "Keep everything exactly as shown in the source image unless it is natural camera parallax.",
       "Do not replace, redesign, recolor, retexture, resize, or omit any furniture item.",
       "Do not add new furniture, decor, people, pets, text, logos, mirrors with reflections, windows, doors, exterior views, curtains, or plants unless already present in the source image.",
@@ -87,14 +62,9 @@ export function buildWalkthroughVideoPrompt(input: WalkthroughVideoPromptInput) 
     "",
     "Create one polished real-estate style video clip from the supplied still image.",
     "The still image is the canonical design reference: animate only the camera, not the furniture.",
-    "Use the same disciplined motion language as a luxury interior photographer capturing a staged showroom.",
+    "Use one smooth 8-second camera move, like a luxury interior photographer walking slowly around the staged showroom.",
     "",
     "STRICT JSON CONSTRAINTS",
     JSON.stringify(contract, null, 2)
   ].join("\n");
-}
-
-function clampIndex(index: number) {
-  if (!Number.isFinite(index)) return 1;
-  return Math.max(1, Math.floor(index));
 }

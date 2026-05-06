@@ -23,25 +23,24 @@ export async function POST(request: NextRequest) {
     const { user, client } = await getAuthenticatedUser(request);
     await assertProjectOwner(body.projectId, user.id, client);
 
-    const jobs = body.images.map((_, index) =>
-      createVideoJob({
-        id: uuidv4(),
-        projectId: body.projectId!,
-        index
-      })
-    );
+    const sourceImage = body.images[0];
+    const job = createVideoJob({
+      id: uuidv4(),
+      projectId: body.projectId,
+      index: 0
+    });
+    const jobs = [job];
 
-    jobs.forEach((job, index) => {
-      const image = body.images![index];
-      const diskFilename = `${sanitize(body.projectId!)}-${index}-${job.id}.mp4`;
+    {
+      const diskFilename = `${sanitize(body.projectId)}-walkthrough-${job.id}.mp4`;
 
       void (async () => {
         try {
           updateVideoJob(job.id, { status: "processing", diskFilename });
-          const imageData = await readImageData(image, request.nextUrl.origin);
+          const imageData = await readImageData(sourceImage, request.nextUrl.origin);
           const prompt = buildWalkthroughVideoPrompt({
-            clipIndex: index + 1,
-            clipCount: body.images!.length,
+            clipIndex: 1,
+            clipCount: 1,
             basePrompt: body.prompt
           });
           const operation = await startVideoGeneration(prompt, imageData.base64, imageData.mimeType);
@@ -60,11 +59,16 @@ export async function POST(request: NextRequest) {
             projectId: body.projectId!,
             mediaId: job.id,
             folder: "videos",
-            kind: "video_clip",
+            kind: "walkthrough_video",
             bytes: video.bytes,
             mimeType: video.mimeType,
             prompt,
-            metadata: { index, clipIndex: index + 1 },
+            metadata: {
+              sourceRenderId: sourceImage.id,
+              selectedRenderCount: body.images!.length,
+              durationSeconds: 8,
+              walkthroughMode: "single_continuous_clip"
+            },
             client
           });
           videoStore.set(job.id, { bytes: video.bytes, mimeType: video.mimeType });
@@ -80,7 +84,7 @@ export async function POST(request: NextRequest) {
           });
         }
       })();
-    });
+    }
 
     return NextResponse.json({ jobs });
   } catch (error) {

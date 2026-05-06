@@ -15,10 +15,12 @@ const project: MoodboardProject = {
   name: "Showroom Draft",
   createdAt: "2026-05-02T08:00:00.000Z",
   updatedAt: "2026-05-02T09:00:00.000Z",
+  budgetAmount: 250000,
+  budgetCurrency: "PHP",
   canvas: {
     width: 1400,
     height: 900,
-    background: "#f7f3ea",
+    background: "#fff7f4",
     items: [
       {
         id: "9de704c3-13ba-41cc-995e-3c5ea7d45821",
@@ -45,7 +47,8 @@ const project: MoodboardProject = {
     }
   ],
   videoJobs: [{ id: "clip-1", status: "succeeded", videoUrl: "https://example.com/clip.mp4" }],
-  stitchedVideoUrl: "https://example.com/final.mp4"
+  stitchedVideoUrl: "https://example.com/final.mp4",
+  presentationUrl: "https://example.com/presentation.pdf"
 };
 
 describe("supabase project store mapping", () => {
@@ -58,7 +61,9 @@ describe("supabase project store mapping", () => {
       name: "Showroom Draft",
       canvas_width: 1400,
       canvas_height: 900,
-      canvas_background: "#f7f3ea"
+      canvas_background: "#fff7f4",
+      budget_amount: 250000,
+      budget_currency: "PHP"
     });
     expect(rows.canvasRows).toEqual([
       {
@@ -84,8 +89,10 @@ describe("supabase project store mapping", () => {
       name: "Showroom Draft",
       canvas_width: 1400,
       canvas_height: 900,
-      canvas_background: "#f7f3ea",
+      canvas_background: "#fff7f4",
       status: "draft",
+      budget_amount: "250000.00",
+      budget_currency: "PHP",
       created_at: "2026-05-02T08:00:00.000Z",
       updated_at: "2026-05-02T09:00:00.000Z",
       canvas_items: [
@@ -126,6 +133,7 @@ describe("supabase project store mapping", () => {
           prompt: "prompt",
           model: "gemini",
           variation_index: 1,
+          metadata: { angleLabel: "Front showroom wide" },
           created_at: "2026-05-02T09:01:00.000Z",
           error: null
         },
@@ -138,7 +146,21 @@ describe("supabase project store mapping", () => {
           prompt: null,
           model: null,
           variation_index: null,
+          metadata: null,
           created_at: "2026-05-02T09:03:00.000Z",
+          error: null
+        },
+        {
+          id: "pdf-1",
+          kind: "presentation_pdf",
+          status: "succeeded",
+          public_url: "https://example.com/presentation.pdf",
+          mime_type: "application/pdf",
+          prompt: null,
+          model: null,
+          variation_index: null,
+          metadata: null,
+          created_at: "2026-05-02T09:04:00.000Z",
           error: null
         }
       ]
@@ -147,8 +169,15 @@ describe("supabase project store mapping", () => {
     expect(mapped.canvas.items.map((item) => item.id)).toEqual(["item-1", "item-2"]);
     expect(mapped.canvas.items[0]).toMatchObject({ x: 410, y: 390, zIndex: 1 });
     expect(mapped.renders).toHaveLength(1);
-    expect(mapped.renders[0]).toMatchObject({ id: "render-1", url: "https://example.com/render.png", selected: true });
+    expect(mapped.renders[0]).toMatchObject({
+      id: "render-1",
+      url: "https://example.com/render.png",
+      selected: true,
+      angleLabel: "Front showroom wide"
+    });
+    expect(mapped.budgetAmount).toBe(250000);
     expect(mapped.stitchedVideoUrl).toBe("https://example.com/final.mp4");
+    expect(mapped.presentationUrl).toBe("https://example.com/presentation.pdf");
   });
 
   it("maps project summaries, media subsets, and storage paths", () => {
@@ -178,6 +207,7 @@ describe("supabase project store mapping", () => {
         prompt: null,
         model: null,
         variation_index: null,
+        metadata: null,
         created_at: "2026-05-02T09:02:00.000Z",
         error: null
       }
@@ -187,6 +217,9 @@ describe("supabase project store mapping", () => {
     expect(mediaToVideoState(media).videoJobs).toEqual([{ id: "clip-1", status: "processing", videoUrl: "", error: undefined }]);
     expect(storagePathForMedia("user-1", project.id, "renders", "render-1", "image/png")).toBe(
       `user-1/${project.id}/renders/render-1.png`
+    );
+    expect(storagePathForMedia("user-1", project.id, "presentations", "pdf-1", "application/pdf")).toBe(
+      `user-1/${project.id}/presentations/pdf-1.pdf`
     );
   });
 

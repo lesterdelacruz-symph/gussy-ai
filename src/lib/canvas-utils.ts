@@ -56,3 +56,42 @@ export function fitAssetToBox(asset: FurnitureAsset, box: { width: number; heigh
     height: Math.max(1, Math.round(asset.naturalHeight * scale))
   };
 }
+
+export function repairCanvasItemAspectRatio(item: CanvasItem, asset: FurnitureAsset | null | undefined): CanvasItem {
+  if (!asset?.naturalWidth || !asset.naturalHeight || !item.width || !item.height) return item;
+
+  const expectedRatio = asset.naturalWidth / asset.naturalHeight;
+  const currentRatio = item.width / item.height;
+  if (!Number.isFinite(expectedRatio) || !Number.isFinite(currentRatio)) return item;
+  if (Math.abs(currentRatio - expectedRatio) / expectedRatio < 0.015) return item;
+
+  const centerX = item.x + item.width / 2;
+  const centerY = item.y + item.height / 2;
+  const size = fitAssetToBox(asset, item);
+  return {
+    ...item,
+    width: size.width,
+    height: size.height,
+    x: Math.round(centerX - size.width / 2),
+    y: Math.round(centerY - size.height / 2)
+  };
+}
+
+export function repairCanvasAspectRatios<T extends { canvas: { items: CanvasItem[] } }>(project: T, assets: FurnitureAsset[]): T {
+  const assetMap = new Map(assets.map((asset) => [asset.id, asset]));
+  let changed = false;
+  const items = project.canvas.items.map((item) => {
+    const repaired = repairCanvasItemAspectRatio(item, assetMap.get(item.assetId));
+    changed ||= repaired !== item;
+    return repaired;
+  });
+
+  if (!changed) return project;
+  return {
+    ...project,
+    canvas: {
+      ...project.canvas,
+      items
+    }
+  };
+}

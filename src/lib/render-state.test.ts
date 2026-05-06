@@ -7,10 +7,12 @@ const baseProject: MoodboardProject = {
   name: "Living Room",
   createdAt: "2026-04-29T00:00:00.000Z",
   updatedAt: "2026-04-29T00:00:00.000Z",
+  budgetAmount: null,
+  budgetCurrency: "PHP",
   canvas: {
     width: 1400,
     height: 900,
-    background: "#f7f3ea",
+    background: "#fff7f4",
     items: []
   },
   renders: [
@@ -25,7 +27,8 @@ const baseProject: MoodboardProject = {
     }
   ],
   videoJobs: [{ id: "job-1", status: "succeeded", videoUrl: "/videos/job-1.mp4" }],
-  stitchedVideoUrl: "/videos/final.mp4"
+  stitchedVideoUrl: "/videos/final.mp4",
+  presentationUrl: null
 };
 
 function render(id: string): GeneratedRender {
